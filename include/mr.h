@@ -24,7 +24,7 @@ typedef struct mr *mr_t;
 
 // Addendum
 
-typedef size_t (*mr_hash_t)(
+typedef size_t (*mr_hash_t)( // puntatore a una funzione che restituisce un numero naturale e che prende 3 parametri
     const char *token,
     size_t token_len,
     void *user_arg
@@ -45,7 +45,7 @@ typedef struct {
     const char *log_file;
 
     mr_hash_t hash;  // NULL <=> usa funzione di default
-    void* hash_arg;
+    void* hash_arg; // parametro opaco che l'utente passa alla funzione hash
 } mr_attr_t;
 
 /*
