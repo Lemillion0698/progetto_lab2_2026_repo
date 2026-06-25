@@ -1,5 +1,12 @@
 #include <stdlib.h>
 #include "../include/mr.h" // path relativo
+#include <unistd.h>
+#include <errno.h>
+#include "io.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #define MR_DEFAULT_MAPPER_THREADS 1
 #define MR_DEFAULT_REDUCER_THREADS 1
@@ -116,10 +123,124 @@ int mr_create(mr_t *mr, const mr_attr_t* attr, mr_mapper_t mapper, mr_reducer_t 
     return 0;
 }
 
+
+int mr_start(mr_t mr, const char *input_path, const char *output_path){
+    // Controllo sui parametri
+    if(mr == NULL || input_path == NULL || output_path == NULL)
+        return -1;
+    
+    // Creazione delle tre pipe
+    int fd_A[2], fd_B[2], fd_C[2]; // descrittori di files delle 3 pipe
+    if(pipe(fd_A) == -1 || pipe(fd_B) == -1 || pipe(fd_C) == -1){
+        return -1;
+    }
+
+    // Creazione del processo Mapper
+    pid_t pid_Mapper = fork();
+    if(pid_Mapper == -1){
+        perror("Errore processo Mapper");
+        exit(EXIT_FAILURE);
+    }
+    if(pid_Mapper == 0){// Siamo nel processo Mapper
+        // Duplicazione dei fd
+        if(dup2(fd_A[0], STDIN_FILENO) == -1) { // Ora quello che sarà in ingresso sul processo Mapper, lo sarà anche sulla pipe A    
+            perror("duplicazione di fd_A[0] non andata a buon fine");
+            exit(EXIT_FAILURE);
+        }
+        if(dup2(fd_B[1], STDOUT_FILENO) == -1) {// Ora quello che sarà in uscita dal processo Mapper, sarà scritto sulla pipe B 
+            perror("duplicazione di fd_B[1] non andata a buon fine");
+            exit(EXIT_FAILURE);
+        }  
+        
+        // Chiusura dei descrittori che non servono
+        close(fd_A[0]); // già duplicato
+        close(fd_B[1]); // già duplicato
+        close(fd_A[1]); // non serve al figlio, solo al padre
+        close(fd_B[0]); // il Mapper non legge dalla pipe B, ma solo dalla pipe A 
+        close(fd_C[0]); // il Mapper non legge ...
+        close(fd_C[1]); // ...né scrive sulla pipe C
+
+        // Il Mapper legge byte dalla pipe A (ora stdin), poi scrive byte sulla pipe B (ora stdout)
+        uint32_t msg;
+        ssize_t r1 = readn(STDIN_FILENO, &msg, sizeof(msg));   // legge 4 byte
+        controllo_io(r1);
+
+        ssize_t r2 = writen(STDOUT_FILENO, &msg, sizeof(msg)); // riscrive gli stessi 4 byte
+        controllo_io(r2);
+
+        exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre.
+    }
+    
+
+    // Creazione del processo Reducer
+    pid_t pid_Reducer = fork();
+    if(pid_Reducer == -1){
+        perror("Errore process Reducer");
+        exit(EXIT_FAILURE);
+    }
+    if(pid_Reducer == 0){ // Siamo nel processo Reducer
+        // Duplicazione dei fd
+        if(dup2(fd_B[0], 0) == -1){// deve leggere dalla pipe B
+            perror("duplicazione di fd_B[0] non andata a buon fine");
+            exit(EXIT_FAILURE);
+        }
+        if(dup2(fd_C[1], 1) == -1){ // deve scrivere sulla pipe C
+            perror("duplicazione di fd_C[1] non andata a buon fine");
+            exit(EXIT_FAILURE);
+        }
+
+        // Chiusura dei descrittori che non servono
+        close(fd_B[0]); // già duplicato
+        close(fd_C[1]); // già duplicato
+        close(fd_A[0]); // non serve, Reducer non legge ...
+        close(fd_A[1]); // né scrive sulla pipe A
+        close(fd_C[0]); // Reducer non legge dalla pipe C
+        close(fd_B[1]); // Reducer non scrive sulla pipe B
+
+        // Il Reducer legge byte dalla pipe B (ora stdin), poi scrive byte sulla pipe C (ora stdout)
+        uint32_t msg;
+        ssize_t r1 = readn(STDIN_FILENO, &msg, sizeof(msg));   // legge 4 byte
+        controllo_io(r1);
+
+        ssize_t r2 = writen(STDOUT_FILENO, &msg, sizeof(msg)); // riscrive gli stessi 4 byte
+        controllo_io(r2);
+
+        exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre
+    }
+
+    // Ora siamo nel Padre
+    close(fd_A[0]); // non legge dalla pipe A
+    close(fd_B[1]); // non scrive ...
+    close(fd_B[0]); // ... né legge dalla pipe B
+    close(fd_C[1]); // non scrive sulla pipe C
+
+    // Il Padre scrive byte sulla pipe A, poi legge byte dalla pipe C
+        uint32_t msg = 5;
+
+        ssize_t r1 = writen(fd_A[1], &msg, sizeof(msg)); // scrive gli stessi 4 byte
+        controllo_io(r1);
+
+        ssize_t r2 = readn(fd_C[0], &msg, sizeof(msg));   // legge 4 byte
+        controllo_io(r2);
+
+        // Controllo del messaggio mandato attraverso le pipe
+        if (msg == 5)
+            printf("Ping OK: %u\n", msg);
+        else
+            printf("Ping FALLITO: ricevuto %u\n", msg);
+    
+    // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
+    waitpid(pid_Mapper, NULL, 0);
+    waitpid(pid_Reducer, NULL, 0);
+
+    return 0;
+}
+
 int mr_destroy(mr_t mr){
     if(mr == NULL){
         return -1;
     }
+
     free(mr);
     return 0;
 }
