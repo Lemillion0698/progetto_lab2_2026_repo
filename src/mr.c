@@ -5,6 +5,7 @@
 #include "io.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -215,19 +216,64 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     close(fd_C[1]); // non scrive sulla pipe C
 
     // Il Padre scrive byte sulla pipe A, poi legge byte dalla pipe C
-        uint32_t msg = 5;
+    uint32_t msg = 5;
 
-        ssize_t r1 = writen(fd_A[1], &msg, sizeof(msg)); // scrive gli stessi 4 byte
-        controllo_io(r1);
+    ssize_t r1 = writen(fd_A[1], &msg, sizeof(msg)); // scrive gli stessi 4 byte
+    controllo_io(r1);
 
-        ssize_t r2 = readn(fd_C[0], &msg, sizeof(msg));   // legge 4 byte
-        controllo_io(r2);
+    ssize_t r2 = readn(fd_C[0], &msg, sizeof(msg));   // legge 4 byte
+    controllo_io(r2);
 
-        // Controllo del messaggio mandato attraverso le pipe
-        if (msg == 5)
-            printf("Ping OK: %u\n", msg);
-        else
-            printf("Ping FALLITO: ricevuto %u\n", msg);
+    // Controllo del messaggio mandato attraverso le pipe
+    if (msg == 5)
+        printf("Ping OK: %u\n", msg);
+    else
+        printf("Ping FALLITO: ricevuto %u\n", msg);
+    
+    // MANDO BYTE GREZZI SULLA PIPE A
+
+    // Apertura del file di input
+    FILE* fp = fopen(input_path, "r"); // apre il file di input in lettura
+    if (fp == NULL){ // controllo se l'apertura è fallita 
+        perror("fopen");
+        return -1;
+    }
+    
+    char buf[256]; // buffer per la lettura riga per riga
+
+    mr_file_line_t linea;
+
+    unsigned long posizione_corrente = 1;
+    char* riga;
+    while(riga = fgets(buf, sizeof buf, fp)){ // deve leggere tutto il file intero
+        // popolo i campi di linea
+        linea.file_name = input_path;
+        linea.file_name_len = strlen(input_path);
+        linea.line_number = posizione_corrente;
+        linea.line = buf;
+        linea.line_len = strlen (riga);
+        
+        // Serializzo prima i campi che non sono puntatori (header), i metadati che descrivono la linea
+        writen(fd_A[1], &linea.file_name_len, sizeof(linea.file_name_len));
+        writen(fd_A[1], &linea.line_number, sizeof(linea.line_number));
+        writen(fd_A[1], &linea.line_len, sizeof(linea.line_len));
+
+        // Serializzo i 2 payload (i contenuti dei dati veri e effettivi)
+        writen(fd_A[1], linea.file_name, linea.file_name_len); // i byte del percorso del file che scrivo sulla pipe
+        writen(fd_A[1], linea.line, linea.line_len); // la riga di byte
+
+        posizione_corrente++; // incremento il numero di riga
+    }
+    close(fd_A[1]); // per segnalare EOF al Mapper: non mando più byte
+
+    
+    // Chiusura del file di input
+    if(fclose(fp) == EOF){
+        perror("fclose");
+    }
+
+    
+    
     
     // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
     waitpid(pid_Mapper, NULL, 0);
@@ -244,3 +290,5 @@ int mr_destroy(mr_t mr){
     free(mr);
     return 0;
 }
+
+
