@@ -136,7 +136,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         return -1;
     }
 
-    // Creazione del processo Mapper
+    // CREAZIONE DEL PROCESSO MAPPER
+
     pid_t pid_Mapper = fork();
     if(pid_Mapper == -1){
         perror("Errore processo Mapper");
@@ -209,7 +210,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre
     }
 
-    // Ora siamo nel Padre
+    // ORA SIAMO NEL PADRE
+
     close(fd_A[0]); // non legge dalla pipe A
     close(fd_B[1]); // non scrive ...
     close(fd_B[0]); // ... né legge dalla pipe B
@@ -258,7 +260,7 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         writen(fd_A[1], &linea.line_number, sizeof(linea.line_number));
         writen(fd_A[1], &linea.line_len, sizeof(linea.line_len));
 
-        // Serializzo i 2 payload (i contenuti dei dati veri e effettivi)
+        // Serializzo i 2 payload (i contenuti dei dati veri ed effettivi)
         writen(fd_A[1], linea.file_name, linea.file_name_len); // i byte del percorso del file che scrivo sulla pipe
         writen(fd_A[1], linea.line, linea.line_len); // la riga di byte
 
@@ -272,9 +274,7 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         perror("fclose");
     }
 
-    
-    
-    
+
     // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
     waitpid(pid_Mapper, NULL, 0);
     waitpid(pid_Reducer, NULL, 0);
