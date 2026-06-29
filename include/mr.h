@@ -77,7 +77,7 @@ typedef struct {
 } mr_value_t;
 
 /*
- * Funzione usata dal mapper per emettere una coppia <token, valore>.
+ * Funzione usata dal Mapper per emettere una coppia <token, valore>.
  *
  * token deve essere una stringa C valida, terminata da '\0',
  * composta soltanto da caratteri alfanumerici ASCII.
@@ -93,7 +93,7 @@ typedef int (*mr_emit_pair_t)(
 );
 
 /*
- * Funzione usata dal reducer per emettere un risultato finale.
+ * Funzione usata dal Reducer per emettere un risultato finale.
  *
  * token deve essere una stringa C valida. Nel progetto base, il token
  * emesso dal reducer deve coincidere con il token ricevuto dalla funzione

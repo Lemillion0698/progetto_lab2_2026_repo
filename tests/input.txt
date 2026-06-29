@@ -1,0 +1,3 @@
+ciao mondo
+il mapper legge questa riga
+terza riga di test
