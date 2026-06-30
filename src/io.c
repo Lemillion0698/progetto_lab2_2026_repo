@@ -14,6 +14,16 @@ void controllo_io(ssize_t fun){
     }
 }
 
+void controllo_io_2(ssize_t fun){
+    if(fun == 0){
+        fprintf(stderr,"Nessun byte letto");
+    }
+    if(fun < 0){
+        fprintf(stderr,"Errore read");
+        exit(EXIT_FAILURE);
+    }
+}
+
 /* =========================================================================
  * readn — legge esattamente n byte dal descrittore fd
  *
