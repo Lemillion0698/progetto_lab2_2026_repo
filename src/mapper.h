@@ -1,16 +1,14 @@
-typedef struct {
-    void** elem;    /* buffer circolare di puntatori */
-    size_t  capacity; /* capacità massima */
-    size_t  head;     /* indice estrazione */
-    size_t  tail;     /* indice inserimento */
-    size_t  count;    /* elementi presenti */
-    int     closed;   /* 1 dopo queue_close(), 0 altrimenti */
-    mtx_t   mutex;
-    cnd_t   not_empty; /* segnalata quando un elemento viene aggiunto */
-    cnd_t   not_full;  /* segnalata quando un elemento viene rimosso */
-} queue_t;
+#include "coda.h"
+#include "../include/mr.h"
 
-typedef struct {
-    queue_t *queue;
-    int fd;
+typedef struct { // serve al thread lettore ...
+    queue_t *coda; // ...per inserire righe in coda ...
+    int fd; // ...per ricevere come input lo stdin del Mapper
 } reader_arg_t;
+
+typedef struct { // serve ad un thread worker ...
+    queue_t* coda; // la coda da cui estrarre
+    mr_t accesso; // per mapper e user_arg della struct mr
+    mtx_t *emit_mutex; // per proteggere una coppia mandata sulla pipe B
+} worker_arg_t;
+
