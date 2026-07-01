@@ -8,26 +8,17 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include "coda.h"
+#include "mapper.h"
+#include "mr_internal.h"
+
+
 
 #define MR_DEFAULT_MAPPER_THREADS 1
 #define MR_DEFAULT_REDUCER_THREADS 1
 #define MR_DEFAULT_QUEUE_SIZE 100
 #define MR_DEFAULT_LOG_FILE "mr.log" // Nome di default del file di log
 
-struct mr {
-    size_t mapper_threads;
-    size_t reducer_threads;
-    size_t queue_size;
-    const char *log_file;
-
-    mr_hash_t hash;
-    void *hash_arg;
-
-    // servono per la funzione mr_create()
-    mr_mapper_t mapper;
-    mr_reducer_t reducer;
-    void *user_arg;
-};
 
 int mr_attr_init(mr_attr_t* attr){
     if (attr == NULL) {
@@ -164,37 +155,7 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         close(fd_C[0]); // il Mapper non legge ...
         close(fd_C[1]); // ...né scrive sulla pipe C
 
-        // Blocco del thread lettore
-        // Lettura e controllo dei 3 header della struct mr_file_line_t
-        mr_file_line_t linea;
-        ssize_t r1;
-        while((r1 = readn(STDIN_FILENO, &(linea.file_name_len), sizeof(linea.file_name_len))) > 0){
-            controllo_io(r1);
-            ssize_t r2 = readn(STDIN_FILENO, &(linea.line_number), sizeof(linea.line_number));
-            controllo_io(r2);
-            ssize_t r3 = readn(STDIN_FILENO, &(linea.line_len), sizeof(linea.line_len));
-            controllo_io(r3);
-
-            // Allocazione dei buffer
-            char* punt_buf_file_name = malloc(linea.file_name_len + 1); 
-            char* punt_buf_line = malloc(linea.line_len + 1);
-
-            // Lettura e controllo dei 2 payload
-            ssize_t r4 = readn(STDIN_FILENO, punt_buf_file_name, linea.file_name_len);
-            controllo_io(r4);
-            ssize_t r5 = readn(STDIN_FILENO, punt_buf_line, linea.line_len);
-            controllo_io(r5);
-
-            // Assegnazione a linea
-            linea.file_name = punt_buf_file_name;
-            linea.line = punt_buf_line;
-
-            // invozione della callback mapper
-            mr->mapper(&linea, emit_pair, NULL, mr->user_arg);
-
-            free(punt_buf_file_name);
-            free(punt_buf_line);
-        }
+        mapper_run(mr); // tutta la logica dei threads si trova dentro
 
         // Chiudo il stdout affinché il Reducer riceva l'EOF
         close(STDOUT_FILENO);
