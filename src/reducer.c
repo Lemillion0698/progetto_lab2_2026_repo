@@ -3,6 +3,9 @@
 #include "io.h"
 #include "reducer.h"
 #include "../include/mr.h"
+#include"mr_internal.h"
+
+#define dim_table 64
 
 /*
 reader_main ha due responsabilità:
@@ -62,27 +65,70 @@ static int worker_main(void* arg){ // funzione per i threads worker
         cnd_wait(a->cd_var, a->emit_mutex); // aspetta che il lettore finisca
     mtx_unlock(a->emit_mutex); 
     
-    size_t nuovo_indice = *(a->shared_index); // prendo il prx indice da processare
-
-    entry_hash_table* punt_entry = a->ht->arr_entry[nuovo_indice]; // puntatore al bucket corrente
     
-    int i=0;
-    while(punt_entry != NULL){
-        nodo* punt_testa = punt_entry->testa;
-        nodo* curr = punt_testa; // per contare il numero di nodi di una entry_hash_table
-        int num_nodi=0;
-        while(curr != NULL){
-            num_nodi++;
-            curr = curr->next;
+    while(1) {
+        mtx_lock(a->emit_mutex);
+        if(*(a->shared_index) >= a->ht->dim_tabella) {
+            mtx_unlock(a->emit_mutex);
+            break;
         }
-        void** arr_valori = malloc(num_nodi*sizeof(void*)); // un array per i valori opachi
-        for( int i=0; i<num_nodi; i++){
-            arr_valori[i] = a->ht->arr_entry[nuovo_indice]->testa->punt_byte;
+        size_t my_idx = (*(a->shared_index))++;
+        mtx_unlock(a->emit_mutex);
+
+        entry_hash_table* entry = a->ht->arr_entry[my_idx];
+        while(entry != NULL) {     // loop sulle entry del bucket
+            // 1. conta i nodi di entry->testa
+            nodo* curr = entry->testa; // per contare i nodi della entry corrente
+            nodo* punt_testa = curr; // per raccogliere tutti i valori
+            size_t num_nodi = 0;
+            while(curr  != NULL){
+                num_nodi++;
+                curr = curr->next;
+            }
+            // 2. alloca arr_valori
+            void** arr_valori = malloc(num_nodi*sizeof(void*)); // per raccogliere tutti i valori dei nodi
+            if(arr_valori == NULL){
+                fprintf(stderr, "arr_valori non allocato con successo\n");
+                return -1;
+            }
+            // 3. riempilo
+            for(size_t i=0; i<num_nodi; i++){
+                arr_valori[i] = punt_testa->punt_byte;
+                punt_testa = punt_testa->next;
+            }
+            // 4. chiama a->accesso->reducer(...)
+            a->accesso->reducer(entry->token, arr_valori, num_nodi, a->rs_finale, a->accesso->user_arg);
+
+            // 5. free(arr_valori)
+            free(arr_valori);
+
+            entry = entry->next_entry;
         }
-        reducer(token, arr_valori, num_nodi, emit_result, user_arg);
-        free(arr_valori);
-        punt_entry= a->ht->arr_entry[nuovo_indice++]; // vado al prossimo bucket
     }
+    return 0;
+}
+
+int reducer_run(mr_t mr){
+    if(!mr){
+        fprintf(stderr, "puntatore mr non inizializzato in Reducer");
+        return -1;
+    }
+
+    // Inizializzare hash table, mutex, condition variable, flag, shared_index
+    hash_table ht;
+    mtx_t mutex;
+    cnd_t cv;
+    int flag = 0;
+    size_t shared_index = 0;
+
+    hashtable_init(&ht, dim_table); // 64 bucket, valore ragionevole
+
+    mtx_init(&mutex, mtx_plain);
+    cnd_init(&cv);
+
+
+
 
     return 0;
 }
+
