@@ -13,7 +13,7 @@ reader_main ha due responsabilità:
 2) Segnalare ai worker — quando riceve EOF (il mapper ha chiuso la pipe B), imposta il flag e fa cnd_broadcast per svegliare tutti i worker che 
    stavano aspettando.
 */
-
+int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg); // dichiarazione forward di emit_result
 static int reader_main(void* arg){ // funzione del thread lettore
     // Cast dell'argomento
     arg_lettore* a = (arg_lettore* )arg;
@@ -59,7 +59,7 @@ Per ogni entry che gli viene assegnata:
 2. Invoca la callback reducer(token, valori[], n_valori, emit_result, user_arg) dell'utente
 3. Continua finché non ci sono più entry da processare */
 static int worker_main(void* arg){ // funzione per i threads worker
-    arg_worker* a = (arg_worker* )arg; // cast del parametro
+    arg_worker* a = (arg_worker*)arg; // cast del parametro
     mtx_lock(a->emit_mutex);
     while(*(a->flag) == 0) // per prevenire i risvegli spuri
         cnd_wait(a->cd_var, a->emit_mutex); // aspetta che il lettore finisca
@@ -126,9 +126,62 @@ int reducer_run(mr_t mr){
     mtx_init(&mutex, mtx_plain);
     cnd_init(&cv);
 
+    // Costruzione di arg_lettore
+    arg_lettore let;
+    let.fd = STDIN_FILENO;
+    let.ht = &ht;
+    let.emit_mutex = &mutex;
+    let.cd_var = &cv;
+    let.flag = &flag;
+    // Creo il thread lettore
+    thrd_t lettore;
+    if(thrd_create(&lettore, reader_main, &let) != thrd_success){
+        fprintf(stderr, "lettore non creato con successo\n");
+        return -1;
+    }
 
 
+    // Costruzione di arg_worker[]
+    size_t num_workers = mr->reducer_threads;
+    arg_worker wk[num_workers];
+    for(size_t i=0; i<num_workers; i++){
+        wk[i].accesso = mr;
+        wk[i].cd_var = &cv;
+        wk[i].emit_mutex = &mutex;
+        wk[i].flag = &flag;
+        wk[i].ht = &ht;
+        wk[i].shared_index = &shared_index;
+        wk[i].rs_finale = emit_result;
+    }
+    // creo i threads workers
+    thrd_t worker[num_workers];
+    for(size_t i=0; i<num_workers; i++){
+        if(thrd_create(&worker[i], worker_main, &wk[i]) != thrd_success){
+            fprintf(stderr, "worker[%lu] non creato con successo\n", i);
+            return -1;
+        }
+    }
+
+    // Terminazione dei threads
+    if(thrd_join(lettore, NULL) != thrd_success){
+        fprintf(stderr, "lettore non unito con successo\n");
+        return -1;
+    }
+    for(size_t i=0; i<num_workers; i++){
+        if(thrd_join(worker[i], NULL) != thrd_success){
+            fprintf(stderr, "worker[%lu] non unito con successo\n", i);
+            return -1;
+        }
+    }
+
+    // Distruzione dei meccanismi di sincronizzazione e della tabella hash
+    hashtable_destroy(&ht);
+    mtx_destroy(&mutex);
+    cnd_destroy(&cv);
 
     return 0;
 }
 
+int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg){
+
+}
