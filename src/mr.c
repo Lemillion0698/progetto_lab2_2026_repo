@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include "coda.h"
 #include "mapper.h"
+#include "reducer.h"
 #include "mr_internal.h"
 
 
@@ -115,8 +116,8 @@ int mr_create(mr_t *mr, const mr_attr_t* attr, mr_mapper_t mapper, mr_reducer_t 
     return 0;
 }
 
-// dichiarazione anticipata di emit_pair
-int emit_pair(const char *token, const void *value, size_t value_size, void *emit_arg);
+
+
 
 int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // Controllo sui parametri
@@ -190,6 +191,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         close(fd_C[0]); // Reducer non legge dalla pipe C
         close(fd_B[1]); // Reducer non scrive sulla pipe B
 
+        reducer_run(mr); // avvio dei threads
+
         exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre
     }
 
@@ -246,30 +249,6 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
     waitpid(pid_Mapper, NULL, 0);
     waitpid(pid_Reducer, NULL, 0);
-
-    return 0;
-}
-
-int emit_pair(const char *token, const void *value, size_t value_size, void *emit_arg) {
-    (void)emit_arg; // soppressione di warning
-
-    // Controllo sulla validità degli elementi della coppia da emettere
-    if(token == NULL || value == NULL){
-        return -1;
-    }
-
-    // Serializzo i dati da mandare sulla pipe B
-    size_t token_len = strlen(token) + 1;
-    // Mando prima gli header ...
-    ssize_t w1 = writen(STDOUT_FILENO, &token_len, sizeof(token_len));
-    controllo_io(w1);
-    ssize_t w2 = writen(STDOUT_FILENO, &value_size, sizeof(value_size));
-    controllo_io(w2);
-    // ...poi i payload
-    ssize_t w3 = writen(STDOUT_FILENO, token, token_len);
-    controllo_io(w3);
-    ssize_t w4 = writen(STDOUT_FILENO, value, value_size);
-    controllo_io(w4);
 
     return 0;
 }

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "io.h"
 #include "reducer.h"
 #include "../include/mr.h"
@@ -13,7 +14,10 @@ reader_main ha due responsabilità:
 2) Segnalare ai worker — quando riceve EOF (il mapper ha chiuso la pipe B), imposta il flag e fa cnd_broadcast per svegliare tutti i worker che 
    stavano aspettando.
 */
-int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg); // dichiarazione forward di emit_result
+
+// dichiarazione forward di emit_result
+static int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg); 
+
 static int reader_main(void* arg){ // funzione del thread lettore
     // Cast dell'argomento
     arg_lettore* a = (arg_lettore* )arg;
@@ -86,18 +90,19 @@ static int worker_main(void* arg){ // funzione per i threads worker
                 curr = curr->next;
             }
             // 2. alloca arr_valori
-            void** arr_valori = malloc(num_nodi*sizeof(void*)); // per raccogliere tutti i valori dei nodi
+           mr_value_t* arr_valori = malloc(num_nodi*sizeof(mr_value_t)); // per raccogliere tutti i valori dei nodi
             if(arr_valori == NULL){
                 fprintf(stderr, "arr_valori non allocato con successo\n");
                 return -1;
             }
             // 3. riempilo
             for(size_t i=0; i<num_nodi; i++){
-                arr_valori[i] = punt_testa->punt_byte;
+                arr_valori[i].data = punt_testa->punt_byte;
+                arr_valori[i].size = punt_testa->lunghezza;
                 punt_testa = punt_testa->next;
             }
             // 4. chiama a->accesso->reducer(...)
-            a->accesso->reducer(entry->token, arr_valori, num_nodi, a->rs_finale, a->accesso->user_arg);
+            a->accesso->reducer(entry->token, arr_valori, num_nodi, a->rs_finale, NULL, a->accesso->user_arg);
 
             // 5. free(arr_valori)
             free(arr_valori);
@@ -157,7 +162,7 @@ int reducer_run(mr_t mr){
     thrd_t worker[num_workers];
     for(size_t i=0; i<num_workers; i++){
         if(thrd_create(&worker[i], worker_main, &wk[i]) != thrd_success){
-            fprintf(stderr, "worker[%lu] non creato con successo\n", i);
+            fprintf(stderr, "worker[%zu] non creato con successo\n", i);
             return -1;
         }
     }
@@ -169,7 +174,7 @@ int reducer_run(mr_t mr){
     }
     for(size_t i=0; i<num_workers; i++){
         if(thrd_join(worker[i], NULL) != thrd_success){
-            fprintf(stderr, "worker[%lu] non unito con successo\n", i);
+            fprintf(stderr, "worker[%zu] non unito con successo\n", i);
             return -1;
         }
     }
@@ -182,6 +187,28 @@ int reducer_run(mr_t mr){
     return 0;
 }
 
-int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg){
+static int emit_result(const char* token, const void* result, size_t result_size, void* emit_arg){
+    // soppressione di warning
+    (void)emit_arg;
 
+    // Controllo sulla validità degli elementi della coppia da emettere
+    if(token == NULL || result == NULL){
+        return -1;
+    }
+
+    // Serializzo i dati da mandare sulla pipe C
+
+    //Mando prima gli header...
+    size_t token_len = strlen(token) + 1;
+    ssize_t w1 = writen(STDOUT_FILENO, &token_len, sizeof(token_len));
+    controllo_io(w1);
+    ssize_t w2 = writen(STDOUT_FILENO, &result_size, sizeof(result_size));
+    controllo_io(w2);
+    // ...poi i payload
+    ssize_t w3 = writen(STDOUT_FILENO, token, token_len);
+    controllo_io(w3);
+    ssize_t w4 = writen(STDOUT_FILENO, result, result_size);
+    controllo_io(w4);
+
+    return 0;
 }

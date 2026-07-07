@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "mapper.h"
 #include "io.h"
 #include "../include/mr.h"
 #include "mr_internal.h"
 
 
-int emit_pair(const char*, const void*, size_t, void*); // dichiarazione forward di emit_pair
+// dichiarazione anticipata di emit_pair
+static int emit_pair(const char*, const void*, size_t, void*); 
 
 static int reader_main(void* arg){ // funzione del thread lettore
     // Cast dell'argomento a reader_arg_t
@@ -138,6 +140,30 @@ int mapper_run(mr_t mr){
     mtx_destroy(&emit_mutex);
     queue_destroy(coda);
     free(coda);
+
+    return 0;
+}
+
+static int emit_pair(const char *token, const void *value, size_t value_size, void *emit_arg) {
+    (void)emit_arg; // soppressione di warning
+
+    // Controllo sulla validità degli elementi della coppia da emettere
+    if(token == NULL || value == NULL){
+        return -1;
+    }
+
+    // Serializzo i dati da mandare sulla pipe B
+    size_t token_len = strlen(token) + 1;
+    // Mando prima gli header ...
+    ssize_t w1 = writen(STDOUT_FILENO, &token_len, sizeof(token_len));
+    controllo_io(w1);
+    ssize_t w2 = writen(STDOUT_FILENO, &value_size, sizeof(value_size));
+    controllo_io(w2);
+    // ...poi i payload
+    ssize_t w3 = writen(STDOUT_FILENO, token, token_len);
+    controllo_io(w3);
+    ssize_t w4 = writen(STDOUT_FILENO, value, value_size);
+    controllo_io(w4);
 
     return 0;
 }
