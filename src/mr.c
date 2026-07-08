@@ -1,13 +1,16 @@
 #include <stdlib.h>
-#include "../include/mr.h" // path relativo
 #include <unistd.h>
 #include <errno.h>
-#include "io.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include "../include/mr.h" // path relativo
+#include "io.h"
 #include "coda.h"
 #include "mapper.h"
 #include "reducer.h"
@@ -20,6 +23,17 @@
 #define MR_DEFAULT_QUEUE_SIZE 100
 #define MR_DEFAULT_LOG_FILE "mr.log" // Nome di default del file di log
 
+// entry dell'array dove accumulare i dati del risulato
+typedef struct {
+    size_t token_len;
+    char*  token;
+    size_t result_len;
+    void*  result;
+} risultato_t;
+
+static int cmp(const void* a, const void* b) {
+    return strcmp(((risultato_t*)a)->token, ((risultato_t*)b)->token);
+}
 
 int mr_attr_init(mr_attr_t* attr){
     if (attr == NULL) {
@@ -115,9 +129,6 @@ int mr_create(mr_t *mr, const mr_attr_t* attr, mr_mapper_t mapper, mr_reducer_t 
 
     return 0;
 }
-
-
-
 
 int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // Controllo sui parametri
@@ -245,6 +256,54 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         perror("fclose");
     }
 
+    // Apertura in scrittura binaria del file output_path
+    int fd_out = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd_out < 0) {
+        perror("Errore apertura file di output");
+        return -1;
+    }
+     
+    risultato_t* arr = NULL; // perché la dimensione dell'array cresce dinamicamente, non sappiamo in anticipo quanti risultati arriveranno dalla pipe C
+    size_t n = 0;
+
+    while(1) {
+        arr = realloc(arr, (n+1)*sizeof(risultato_t)); // allocazione dinamica di n+1 risultato_t
+
+        ssize_t r0 = readn(fd_C[0], &arr[n].token_len, sizeof(arr[n].token_len));
+        if(r0 <= 0) break;                          // EOF: esci
+
+        controllo_io(readn(fd_C[0], &arr[n].result_len, sizeof(arr[n].result_len)));
+
+        arr[n].token = malloc(arr[n].token_len);
+        controllo_io(readn(fd_C[0], arr[n].token, arr[n].token_len));
+
+        arr[n].result = malloc(arr[n].result_len);
+        controllo_io(readn(fd_C[0], arr[n].result, arr[n].result_len));
+
+        n++;
+    }
+
+    // ordinare lessicograficamente i token
+    qsort(arr, n, sizeof(risultato_t), cmp);
+
+    // scrivere sul file di output
+    for(size_t i = 0; i < n; i++) {
+        controllo_io(writen(fd_out, &arr[i].token_len, sizeof(arr[i].token_len)));
+        controllo_io(writen(fd_out, arr[i].token, arr[i].token_len));
+        controllo_io(writen(fd_out, &arr[i].result_len, sizeof(arr[i].result_len)));
+        controllo_io(writen(fd_out, arr[i].result, arr[i].result_len));
+    }
+
+    // libero tutto ciò che ho allocato
+    for(size_t i = 0; i < n; i++) {
+        free(arr[i].token);
+        free(arr[i].result);
+    }
+    free(arr);
+
+    // Chiudo il lato di lettura della pipe C e il file output_path
+    close(fd_C[0]);
+    close(fd_out);
 
     // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
     waitpid(pid_Mapper, NULL, 0);
