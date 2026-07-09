@@ -5,6 +5,7 @@ LDFLAGS = -lpthread
 SRC_DIR  = src
 OBJ_DIR  = obj
 TEST_DIR = tests
+EXAMPLES_DIR = examples
 
 SRCS = $(SRC_DIR)/mr.c         \
        $(SRC_DIR)/mapper.c     \
@@ -13,10 +14,13 @@ SRCS = $(SRC_DIR)/mr.c         \
        $(SRC_DIR)/coda.c       \
        $(SRC_DIR)/io.c
 
+EXAMPLES = $(EXAMPLES_DIR)/wordcount.c
+
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
 LIB      = libmr.a
 TEST_BIN = test_ping
+WORDCOUNT = wordcount
 
 .PHONY: all test clean
 
@@ -30,6 +34,9 @@ $(TEST_BIN): $(TEST_DIR)/test_ping.c $(LIB)
 $(LIB): $(OBJS)
 	ar rcs $@ $^
 
+$(WORDCOUNT): $(EXAMPLES) $(LIB)
+	$(CC) $(CFLAGS) $< -L. -lmr $(LDFLAGS) -o $@
+
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -37,4 +44,4 @@ $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
 clean:
-	rm -f $(OBJ_DIR)/*.o $(LIB) $(TEST_BIN)
+	rm -f $(OBJ_DIR)/*.o $(LIB) $(TEST_BIN) $(WORDCOUNT)
