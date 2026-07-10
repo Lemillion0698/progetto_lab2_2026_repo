@@ -1,11 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include "mapper.h"
 #include "io.h"
 #include "../include/mr.h"
 #include "mr_internal.h"
+#include "log.h"
 
+
+static _Atomic size_t contatore_coppie = 0;
 
 // dichiarazione anticipata di emit_pair
 static int emit_pair(const char*, const void*, size_t, void*); 
@@ -58,7 +62,7 @@ static int reader_main(void* arg){ // funzione del thread lettore
 
         // Inserisco ogni linea nella coda
         queue_push(a->coda, linea);
-
+        
     }
 
     // Quando EOF chiamare queue_close()
@@ -107,9 +111,11 @@ int mapper_run(mr_t mr){
     reader_arg_t arg_lettore;
     arg_lettore.coda = coda;
     arg_lettore.fd = STDIN_FILENO;
+
     if(thrd_create(&lettore, reader_main, &arg_lettore) != thrd_success){
         return -1;
     }
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "THREAD", "reader mapper avviato");
 
     thrd_t worker[mr->mapper_threads];
     worker_arg_t arg_worker[mr->mapper_threads];
@@ -130,12 +136,19 @@ int mapper_run(mr_t mr){
         return -1;
     }
 
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "THREAD", "reader mapper terminato");
+
     for(size_t i=0; i<mr->mapper_threads; i++){
         if (thrd_join(worker[i], NULL) != thrd_success){
             fprintf(stderr, "Thread worker %zu non terminato correttamente\n",i);
             return -1;
         }
     }
+
+    char msg[256];
+    snprintf(msg, sizeof(msg), "coppie prodotte dal mapper: %zu", contatore_coppie);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "COPPIE", msg);
+
     // distruggi
     mtx_destroy(&emit_mutex);
     queue_destroy(coda);
@@ -164,6 +177,8 @@ static int emit_pair(const char *token, const void *value, size_t value_size, vo
     controllo_io(w3);
     ssize_t w4 = writen(STDOUT_FILENO, value, value_size);
     controllo_io(w4);
+
+    contatore_coppie++;
 
     return 0;
 }

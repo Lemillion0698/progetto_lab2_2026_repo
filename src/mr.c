@@ -15,6 +15,7 @@
 #include "mapper.h"
 #include "reducer.h"
 #include "mr_internal.h"
+#include "log.h"
 
 
 
@@ -22,6 +23,7 @@
 #define MR_DEFAULT_REDUCER_THREADS 1
 #define MR_DEFAULT_QUEUE_SIZE 100
 #define MR_DEFAULT_LOG_FILE "mr.log" // Nome di default del file di log
+
 
 // entry dell'array dove accumulare i dati del risulato
 typedef struct {
@@ -131,22 +133,37 @@ int mr_create(mr_t *mr, const mr_attr_t* attr, mr_mapper_t mapper, mr_reducer_t 
 }
 
 int mr_start(mr_t mr, const char *input_path, const char *output_path){
+    char msg[256];
     // Controllo sui parametri
     if(mr == NULL || input_path == NULL || output_path == NULL)
         return -1;
-    
+
+    sem_t* sem = sem_open(MR_LOG_SEM_NAME, O_CREAT | O_EXCL, 0644, 1);
+    sem_close(sem); // il padre chiude l'handle, ma il semaforo rimane
+
     // Creazione delle tre pipe
     int fd_A[2], fd_B[2], fd_C[2]; // descrittori di files delle 3 pipe
     if(pipe(fd_A) == -1 || pipe(fd_B) == -1 || pipe(fd_C) == -1){
+        snprintf(msg, sizeof(msg), "pipe() fallita: %s", strerror(errno));
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
         return -1;
     }
+
+    // Chiamata della funzione di scrittura del log
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "PIPE", "pipe A, B, C create");
 
     // CREAZIONE DEL PROCESSO MAPPER
 
     pid_t pid_Mapper = fork();
     if(pid_Mapper == -1){
-        perror("Errore processo Mapper");
-        exit(EXIT_FAILURE);
+        snprintf(msg, sizeof(msg), "fork() mapper fallita: %s", strerror(errno));
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
+        return -1;
+    }
+    
+    if(pid_Mapper > 0) {   // ← solo nel padre
+        snprintf(msg, sizeof(msg), "processo mapper creato, PID=%ld", (long)pid_Mapper);
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "PROCESSO", msg);
     }
     if(pid_Mapper == 0){ // Siamo nel processo Mapper
         // Duplicazione dei fd
@@ -180,9 +197,16 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
 
     pid_t pid_Reducer = fork();
     if(pid_Reducer == -1){
-        perror("Errore process Reducer");
-        exit(EXIT_FAILURE);
+        snprintf(msg, sizeof(msg), "fork() mapper fallita: %s", strerror(errno));
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
+        return -1;
     }
+
+    if(pid_Reducer > 0) {
+        snprintf(msg, sizeof(msg), "processo reducer creato, PID=%ld", (long)pid_Reducer);
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "PROCESSO", msg);
+    }
+    
     if(pid_Reducer == 0){ // Siamo nel processo Reducer
         // Duplicazione dei fd
         if(dup2(fd_B[0], 0) == -1){// deve leggere dalla pipe B
@@ -219,10 +243,16 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // Apertura del file di input
     FILE* fp = fopen(input_path, "r"); // apre il file di input in lettura
     if (fp == NULL){ // controllo se l'apertura è fallita 
+        snprintf(msg, sizeof(msg), "fopen(%s) fallita: %s", input_path, strerror(errno));
+        log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
         perror("fopen");
         return -1;
     }
     
+    // chiamata della funzione di scrittura del file di log
+    snprintf(msg, sizeof(msg), "file input aperto: %s", input_path);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", msg);
+
     char buf[256]; // buffer per la lettura riga per riga
 
     mr_file_line_t linea;
@@ -248,6 +278,10 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
 
         posizione_corrente++; // incremento il numero di riga
     }
+    snprintf(msg, sizeof(msg), "righe inviate al mapper: %lu", posizione_corrente - 1);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "RIGHE", msg);
+
+
     close(fd_A[1]); // per segnalare EOF al Mapper: non mando più byte
 
     
@@ -255,6 +289,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     if(fclose(fp) == EOF){
         perror("fclose");
     }
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", "file input chiuso");
+
 
     // Apertura in scrittura binaria del file output_path
     int fd_out = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -262,6 +298,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         perror("Errore apertura file di output");
         return -1;
     }
+    snprintf(msg, sizeof(msg), "file output aperto: %s", output_path);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", msg);
      
     risultato_t* arr = NULL; // perché la dimensione dell'array cresce dinamicamente, non sappiamo in anticipo quanti risultati arriveranno dalla pipe C
     size_t n = 0;
@@ -286,6 +324,9 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // ordinare lessicograficamente i token
     qsort(arr, n, sizeof(risultato_t), cmp);
 
+    snprintf(msg, sizeof(msg), "risultati finali prodotti: %zu", n);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "RISULTATI", msg);
+
     // scrivere sul file di output
     for(size_t i = 0; i < n; i++) {
         controllo_io(writen(fd_out, &arr[i].token_len, sizeof(arr[i].token_len)));
@@ -305,9 +346,13 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     close(fd_C[0]);
     close(fd_out);
 
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", "file output chiuso");
+
     // Il padre attende la fine di entrambi i processi figli per evitare processi "zombie"
     waitpid(pid_Mapper, NULL, 0);
     waitpid(pid_Reducer, NULL, 0);
+
+    sem_unlink(MR_LOG_SEM_NAME);
 
     return 0;
 }

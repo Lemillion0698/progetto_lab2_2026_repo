@@ -1,6 +1,6 @@
 CC      = gcc
 CFLAGS  = -std=c11 -Wall -Wextra -g -D_POSIX_C_SOURCE=200809L -I./include -I./src
-LDFLAGS = -lpthread
+LDFLAGS = -lpthread -lrt
 
 SRC_DIR  = src
 OBJ_DIR  = obj
@@ -12,7 +12,8 @@ SRCS = $(SRC_DIR)/mr.c         \
        $(SRC_DIR)/reducer.c    \
        $(SRC_DIR)/hashtable.c  \
        $(SRC_DIR)/coda.c       \
-       $(SRC_DIR)/io.c
+       $(SRC_DIR)/io.c		   \
+	   $(SRC_DIR)/log.c
 
 EXAMPLES = $(EXAMPLES_DIR)/wordcount.c
 
@@ -24,7 +25,7 @@ WORDCOUNT = wordcount
 
 .PHONY: all test clean
 
-all: $(LIB)
+all: $(LIB) $(WORDCOUNT)
 
 test: $(TEST_BIN)
 

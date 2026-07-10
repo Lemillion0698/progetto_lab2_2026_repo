@@ -1,12 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include "io.h"
 #include "reducer.h"
 #include "../include/mr.h"
-#include"mr_internal.h"
+#include "mr_internal.h"
+#include "log.h"
 
 #define dim_table 64
+
+static _Atomic size_t contatore_risultati = 0;
 
 /*
 reader_main ha due responsabilità:
@@ -144,7 +148,7 @@ int reducer_run(mr_t mr){
         fprintf(stderr, "lettore non creato con successo\n");
         return -1;
     }
-
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "THREAD", "reader reducer avviato");
 
     // Costruzione di arg_worker[]
     size_t num_workers = mr->reducer_threads;
@@ -179,10 +183,18 @@ int reducer_run(mr_t mr){
         }
     }
 
+    // dopo tutti i thrd_join dei worker
+    char msg[256];
+    snprintf(msg, sizeof(msg), "risultati emessi dal reducer: %zu", contatore_risultati);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "RISULTATI", msg);
+
+
     // Distruzione dei meccanismi di sincronizzazione e della tabella hash
     hashtable_destroy(&ht);
     mtx_destroy(&mutex);
     cnd_destroy(&cv);
+
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "THREAD", "reader reducer terminato");
 
     return 0;
 }
@@ -209,6 +221,8 @@ static int emit_result(const char* token, const void* result, size_t result_size
     controllo_io(w3);
     ssize_t w4 = writen(STDOUT_FILENO, result, result_size);
     controllo_io(w4);
+
+    contatore_risultati++;
 
     return 0;
 }
