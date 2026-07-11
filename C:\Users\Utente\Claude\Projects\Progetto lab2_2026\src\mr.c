@@ -214,7 +214,7 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         files[0] = strdup(input_path);
         nfiles = 1;
     } else if(S_ISDIR(st.st_mode)){
-        if(collect_files(input_path, &files, &nfiles) == -1){
+        if(collect_files(input_path, &files, &nfiles); == -1){
             fprintf(stderr, "raccolta dei files della directory corrente fallita\n");
             return -1;
         }
@@ -328,42 +328,55 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     // MANDO BYTE GREZZI SULLA PIPE A
 
     // Apertura del file di input
-    char buf[256];
-    mr_file_line_t linea;
-    unsigned long total_lines = 0;
-
-    for(size_t f = 0; f < nfiles; f++){
-        FILE* fp = fopen(files[f], "r");
-        if(!fp){ 
-            snprintf(msg, sizeof(msg), "fopen(%s) fallita: %s", files[f], strerror(errno));
+    FILE* fp = fopen(input_path, "r"); // apre il file di input in lettura
+    if (fp == NULL){ // controllo se l'apertura è fallita 
+        snprintf(msg, sizeof(msg), "fopen(%s) fallita: %s", input_path, strerror(errno));
         log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
-        continue;
-        }
-        unsigned long pos = 1;
-        char* riga;
-        while((riga = fgets(buf, sizeof buf, fp))){
-            linea.file_name     = files[f];
-            linea.file_name_len = strlen(files[f]);
-            linea.line_number   = pos;
-            linea.line          = buf;
-            linea.line_len      = strlen(riga);
-            writen(fd_A[1], &linea.file_name_len, sizeof(linea.file_name_len));
-            writen(fd_A[1], &linea.line_number,   sizeof(linea.line_number));
-            writen(fd_A[1], &linea.line_len,       sizeof(linea.line_len));
-            writen(fd_A[1], linea.file_name,       linea.file_name_len);
-            writen(fd_A[1], linea.line,            linea.line_len);
-            pos++; total_lines++;
-        }
-        fclose(fp);
+        perror("fopen");
+        return -1;
     }
-    snprintf(msg, sizeof(msg), "righe inviate al mapper: %lu", total_lines);
-    log_write(mr->log_file, MR_LOG_SEM_NAME, "RIGHE", msg);
+    
+    // chiamata della funzione di scrittura del file di log
+    snprintf(msg, sizeof(msg), "file input aperto: %s", input_path);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", msg);
 
-    for(size_t f = 0; f < nfiles; f++) free(files[f]);
-    free(files);
+    char buf[256]; // buffer per la lettura riga per riga
+
+    mr_file_line_t linea;
+
+    unsigned long posizione_corrente = 1;
+    char* riga;
+    while((riga = fgets(buf, sizeof buf, fp))){ // deve leggere tutto il file intero
+        // popolo i campi di linea
+        linea.file_name = input_path;
+        linea.file_name_len = strlen(input_path);
+        linea.line_number = posizione_corrente;
+        linea.line = buf;
+        linea.line_len = strlen (riga);
+        
+        // Serializzo prima i campi che non sono puntatori (header), i metadati che descrivono la linea
+        writen(fd_A[1], &linea.file_name_len, sizeof(linea.file_name_len));
+        writen(fd_A[1], &linea.line_number, sizeof(linea.line_number));
+        writen(fd_A[1], &linea.line_len, sizeof(linea.line_len));
+
+        // Serializzo i 2 payload (i contenuti dei dati veri ed effettivi)
+        writen(fd_A[1], linea.file_name, linea.file_name_len); // i byte del percorso del file che scrivo sulla pipe
+        writen(fd_A[1], linea.line, linea.line_len); // la riga di byte
+
+        posizione_corrente++; // incremento il numero di riga
+    }
+    snprintf(msg, sizeof(msg), "righe inviate al mapper: %lu", posizione_corrente - 1);
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "RIGHE", msg);
 
 
     close(fd_A[1]); // per segnalare EOF al Mapper: non mando più byte
+
+    
+    // Chiusura del file di input
+    if(fclose(fp) == EOF){
+        perror("fclose");
+    }
+    log_write(mr->log_file, MR_LOG_SEM_NAME, "FILE", "file input chiuso");
 
 
     // Apertura in scrittura binaria del file output_path
