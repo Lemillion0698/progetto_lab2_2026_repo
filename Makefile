@@ -28,6 +28,7 @@ WORDCOUNT = wordcount
 all: $(LIB) $(WORDCOUNT)
 
 test: $(TEST_BIN)
+	./$(TEST_BIN)
 
 $(TEST_BIN): $(TEST_DIR)/test_ping.c $(LIB)
 	$(CC) $(CFLAGS) $< -L. -lmr $(LDFLAGS) -o $@
@@ -46,3 +47,4 @@ $(OBJ_DIR):
 
 clean:
 	rm -f $(OBJ_DIR)/*.o $(LIB) $(TEST_BIN) $(WORDCOUNT)
+	rm -f mr.log output output1 output2

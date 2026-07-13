@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include "../include/mr.h" // path relativo
 #include "io.h"
 #include "coda.h"
@@ -69,16 +70,12 @@ static int collect_files(const char* path, char*** arr, size_t* n){
             return -1;
         }
         else {
-            printf("Attributi %s:\n",full_path); /* nome file */
-            printf("tipo: "); /* stampa il tipo */
             if (S_ISREG(info.st_mode)){ 
-                printf("file regolare");
                 *arr = realloc(*arr, (*n + 1) * sizeof(char*));
                 (*arr)[*n] = full_path;
                 (*n)++;
             }
             else if (S_ISDIR(info.st_mode)){
-                printf(" è una directory");
                 collect_files(full_path, arr, n); // scansione ricorsiva di una directory interna
                 free(full_path);
             }
@@ -197,6 +194,9 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     if(mr == NULL || input_path == NULL || output_path == NULL)
         return -1;
 
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
     char msg[256];
 
     // Effettuo la scansione ricorsiva
@@ -273,9 +273,10 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
 
         mapper_run(mr); // tutta la logica dei threads si trova dentro
 
-        // Chiudo il stdout affinché il Reducer riceva l'EOF
-        close(STDOUT_FILENO);
         
+        close(STDOUT_FILENO); // Chiudo il stdout affinché il Reducer riceva l'EOF
+        close(STDIN_FILENO);   // chiude pipe A read end
+
         exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre.
     }
     
@@ -315,6 +316,9 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
 
         reducer_run(mr); // avvio dei threads
 
+        close(STDIN_FILENO);   // chiude pipe B read end
+        close(STDOUT_FILENO);  // chiude pipe C write end → EOF al padre
+
         exit(EXIT_SUCCESS); // senza, il figlio esce dal blocco if e raggiunge il return 0 finale, tornando al chiamante come se fosse il padre
     }
 
@@ -336,8 +340,8 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
         FILE* fp = fopen(files[f], "r");
         if(!fp){ 
             snprintf(msg, sizeof(msg), "fopen(%s) fallita: %s", files[f], strerror(errno));
-        log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
-        continue;
+            log_write(mr->log_file, MR_LOG_SEM_NAME, "ERRORE", msg);
+            continue;
         }
         unsigned long pos = 1;
         char* riga;
@@ -427,6 +431,22 @@ int mr_start(mr_t mr, const char *input_path, const char *output_path){
     waitpid(pid_Reducer, NULL, 0);
 
     sem_unlink(MR_LOG_SEM_NAME);
+
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    double elapsed = (t_end.tv_sec - t_start.tv_sec) +
+                    (t_end.tv_nsec - t_start.tv_nsec) / 1e9;
+
+    FILE* stats = fopen("statistics.txt", "a");
+    if(stats){
+        fprintf(stats, "--- Esecuzione mr_start ---\n");
+        fprintf(stats, "Input:            %s\n", input_path);
+        fprintf(stats, "Output:           %s\n", output_path);
+        fprintf(stats, "Righe lette:      %lu\n", total_lines);
+        fprintf(stats, "Token distinti:   %zu\n", n);
+        fprintf(stats, "Risultati emessi: %zu\n", n);
+        fprintf(stats, "Tempo (s):        %.6f\n\n", elapsed);
+        fclose(stats);
+    }
 
     return 0;
 }

@@ -42,6 +42,20 @@ int reducer (const char *token, const mr_value_t *values, size_t values_count, m
     return 0;
 }
 
+qsort()
+
+/*int main(void) {
+    mr_attr_t attr;
+    mr_attr_init(&attr);
+
+    mr_t mr;
+    mr_create(&mr, &attr, mapper, reducer, NULL);
+
+    mr_start(mr, "tests/input.txt", "output");
+
+    mr_destroy(mr);
+    return 0;
+}*/
 
 int main(void) {
     mr_attr_t attr;
@@ -49,7 +63,8 @@ int main(void) {
     mr_t mr;
     mr_create(&mr, &attr, mapper, reducer, NULL);
 
-    mr_start(mr, "tests/input.txt", "output");
+    mr_start(mr, "tests/input.txt", "output1");
+    mr_start(mr, "tests/input.txt", "output2");
 
     mr_destroy(mr);
     return 0;
