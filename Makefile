@@ -48,3 +48,4 @@ $(OBJ_DIR):
 clean:
 	rm -f $(OBJ_DIR)/*.o $(LIB) $(TEST_BIN) $(WORDCOUNT)
 	rm -f mr.log output output1 output2
+	rm -f statistics.txt

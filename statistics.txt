@@ -1,8 +1,0 @@
---- Esecuzione mr_start ---
-Input:            tests/input.txt
-Output:           output
-Righe lette:      3
-Token distinti:   10
-Risultati emessi: 10
-Tempo (s):        0.007984
-
